@@ -167,7 +167,7 @@ class Scene(object):
             self.task.restore_state(self._initial_task_state)
         self.task.set_initial_objects_in_scene()
 
-    def get_observation(self) -> Observation:
+    def get_observation(self, related_object_names=None) -> Observation:
         tip = self.robot.arm.get_tip()
 
         joint_forces = None
@@ -255,6 +255,15 @@ class Scene(object):
         front_mask = get_mask(self._cam_front_mask,
                               fc_mask_fn) if fc_ob.mask else None
 
+        # print([_obj.get_name() for _obj in self.task.get_base().get_objects_in_tree()])
+        misc = self._get_misc()
+        if related_object_names is not None:
+            obj_pos_color = {}
+            for obj_name in related_object_names:
+                obj = self.task.get_base().get_object(obj_name)
+                obj_pos_color[obj_name] = np.concatenate([obj.get_position(), np.array(obj.get_color())])
+            misc.update(obj_pos_color)
+
         obs = Observation(
             left_shoulder_rgb=left_shoulder_rgb,
             left_shoulder_depth=left_shoulder_depth,
@@ -307,7 +316,7 @@ class Scene(object):
             ignore_collisions=(
                 np.array((1.0 if self._ignore_collisions_for_current_waypoint else 0.0))
                 if self._obs_config.record_ignore_collisions else None),
-            misc=self._get_misc())
+            misc=misc)
         obs = self.task.decorate_observation(obs)
         return obs
 
@@ -322,7 +331,7 @@ class Scene(object):
 
     def get_demo(self, record: bool = True,
                  callable_each_step: Callable[[Observation], None] = None,
-                 randomly_place: bool = True) -> Demo:
+                 randomly_place: bool = True, related_object_names: List = None) -> Demo:
         """Returns a demo (list of observations)"""
 
         if not self._has_init_task:
@@ -340,7 +349,7 @@ class Scene(object):
         demo = []
         if record:
             self.pyrep.step()  # Need this here or get_force doesn't work...
-            demo.append(self.get_observation())
+            demo.append(self.get_observation(related_object_names))
         while True:
             success = False
             self._ignore_collisions_for_current_waypoint = False
@@ -371,7 +380,7 @@ class Scene(object):
                 while not done:
                     done = path.step()
                     self.step()
-                    self._demo_record_step(demo, record, callable_each_step)
+                    self._demo_record_step(demo, record, callable_each_step, related_object_names)
                     success, term = self.task.success()
 
                 point.end_of_path()
@@ -394,7 +403,7 @@ class Scene(object):
                                 self.task.step()
                                 if self._obs_config.record_gripper_closing:
                                     self._demo_record_step(
-                                        demo, record, callable_each_step)
+                                        demo, record, callable_each_step, related_object_names)
                     elif 'close_gripper(' in ext:
                         start_of_bracket = ext.index('close_gripper(') + 14
                         contains_param = ext[start_of_bracket] != ')'
@@ -406,7 +415,7 @@ class Scene(object):
                                 self.task.step()
                                 if self._obs_config.record_gripper_closing:
                                     self._demo_record_step(
-                                        demo, record, callable_each_step)
+                                        demo, record, callable_each_step, related_object_names)
 
                     if contains_param:
                         rest = ext[start_of_bracket:]
@@ -418,13 +427,13 @@ class Scene(object):
                             self.task.step()
                             if self._obs_config.record_gripper_closing:
                                 self._demo_record_step(
-                                    demo, record, callable_each_step)
+                                    demo, record, callable_each_step, related_object_names)
 
                     if 'close_gripper(' in ext:
                         for g_obj in self.task.get_graspable_objects():
                             gripper.grasp(g_obj)
 
-                    self._demo_record_step(demo, record, callable_each_step)
+                    self._demo_record_step(demo, record, callable_each_step, related_object_names)
 
             if not self.task.should_repeat_waypoints() or success:
                 break
@@ -435,7 +444,7 @@ class Scene(object):
             for _ in range(10):
                 self.pyrep.step()
                 self.task.step()
-                self._demo_record_step(demo, record, callable_each_step)
+                self._demo_record_step(demo, record, callable_each_step, related_object_names)
                 success, term = self.task.success()
                 if success:
                     break
@@ -455,11 +464,11 @@ class Scene(object):
                 self._workspace_maxy > y > self._workspace_miny and
                 self._workspace_maxz > z > self._workspace_minz)
 
-    def _demo_record_step(self, demo_list, record, func):
+    def _demo_record_step(self, demo_list, record, func, related_object_names=None):
         if record:
-            demo_list.append(self.get_observation())
+            demo_list.append(self.get_observation(related_object_names))
         if func is not None:
-            func(self.get_observation())
+            func(self.get_observation(related_object_names))
 
     def _set_camera_properties(self) -> None:
         def _set_rgb_props(rgb_cam: VisionSensor,
