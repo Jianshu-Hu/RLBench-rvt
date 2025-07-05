@@ -256,12 +256,18 @@ class Scene(object):
                               fc_mask_fn) if fc_ob.mask else None
 
         # print([_obj.get_name() for _obj in self.task.get_base().get_objects_in_tree()])
+        # print(related_object_names)
         misc = self._get_misc()
         if related_object_names is not None:
             obj_pos_color = {}
             for obj_name in related_object_names:
                 obj = self.task.get_base().get_object(obj_name)
-                obj_pos_color[obj_name] = np.concatenate([obj.get_position(), np.array(obj.get_color())])
+                pos = obj.get_position()
+                if hasattr(obj, 'get_color'):
+                    color = np.array(obj.get_color())
+                else:
+                    color = np.array([0.0, 0.0, 0.0])
+                obj_pos_color[obj_name] = np.concatenate([pos, color])
             misc.update(obj_pos_color)
 
         obs = Observation(
